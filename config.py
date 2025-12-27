@@ -91,6 +91,11 @@ ROW_FP_HAMMING_THRESH = int(os.getenv("ROW_FP_HAMMING_THRESH", "6"))  # Max Hamm
 ROW_STABILITY_FRAMES = int(os.getenv("ROW_STABILITY_FRAMES", "3"))  # Frames change must persist before emitting
 ROW_BBOX_JITTER_PX = int(os.getenv("ROW_BBOX_JITTER_PX", "2"))  # Ignore bbox movement below this
 
+# Segmentation warmup gating (prevent empty OCR on startup)
+STABLE_GRID_FRAMES = int(os.getenv("STABLE_GRID_FRAMES", "5"))  # Consecutive stable frames before allowing events
+MIN_EXPECTED_ROWS = 6  # Minimum rows for valid table
+EXPECTED_NUM_COLS = 4  # Expected number of columns
+
 # Debug settings
 ROW_SEGMENT_DEBUG = True  # Save segmentation debug images
 EVENT_IMAGE_DEBUG = True  # Save event debug images

@@ -185,6 +185,16 @@ class OCRParser:
                     result['notes'].append("Missing symbol")
                 if result['price'] is None:
                     result['notes'].append("Missing price")
+            
+            # Save failure crops when OCR fails or returns empty
+            if result['parsed'] == 0:
+                failed_fields = []
+                if not result['symbol']:
+                    failed_fields.append('symbol')
+                if result['price'] is None:
+                    failed_fields.append('price')
+                if failed_fields:
+                    self._save_failure_crops(columns, debug_prefix, failed_fields)
         
         except Exception as e:
             logger.error(f"OCR parsing error: {e}", exc_info=True)
@@ -195,7 +205,7 @@ class OCRParser:
     
     def _ocr_image(self, img: np.ndarray, mode: str = 'generic') -> str:
         """
-        Run OCR on preprocessed image with mode-specific configuration
+        Run OCR on preprocessed image with mode-specific configuration and retry fallback
         
         Args:
             img: Image to OCR
@@ -224,7 +234,18 @@ class OCRParser:
         # Run tesseract
         try:
             text = pytesseract.image_to_string(preprocessed, config=config)
-            return text.strip()
+            text = text.strip()
+            
+            # Retry with fallback if empty
+            if not text and mode in ['symbol', 'price']:
+                logger.debug(f"Strict {mode} OCR returned empty, retrying with psm 7 no whitelist")
+                fallback_config = '--psm 7'
+                text = pytesseract.image_to_string(preprocessed, config=fallback_config)
+                text = text.strip()
+                if text:
+                    logger.debug(f"Fallback OCR retrieved: '{text}'")
+            
+            return text
         except Exception as e:
             logger.error(f"Tesseract OCR failed: {e}")
             return ""
@@ -419,7 +440,43 @@ class OCRParser:
         
         for col_name, col_img in columns.items():
             if col_img is not None and col_img.size > 0:
-                filename = debug_dir / f"{prefix}_{col_name}_{timestamp}.png"
+                # Save original crop
+                filename = debug_dir / f"{prefix}_{col_name}_pre_{timestamp}.png"
                 cv2.imwrite(str(filename), col_img)
+                
+                # Also save preprocessed version for price/symbol
+                if col_name in ['symbol', 'price']:
+                    preprocessed = self._preprocess_for_ocr(col_img, mode=col_name)
+                    filename_post = debug_dir / f"{prefix}_{col_name}_post_{timestamp}.png"
+                    cv2.imwrite(str(filename_post), preprocessed)
         
         logger.debug(f"Saved debug crops to {debug_dir}")
+    
+    def _save_failure_crops(self, columns: dict, prefix: str, failed_fields: list):
+        """
+        Save crops when OCR fails (always save, even if EVENT_IMAGE_DEBUG is off)
+        
+        Args:
+            columns: Dict of column crops
+            prefix: Filename prefix
+            failed_fields: List of field names that failed (e.g., ['symbol', 'price'])
+        """
+        debug_dir = self.config.DEBUG_FRAMES_DIR / "ocr_failures"
+        debug_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        
+        for field in failed_fields:
+            if field in columns:
+                col_img = columns[field]
+                if col_img is not None and col_img.size > 0:
+                    # Save original
+                    filename = debug_dir / f"{prefix}_{field}_pre_{timestamp}.png"
+                    cv2.imwrite(str(filename), col_img)
+                    
+                    # Save preprocessed
+                    preprocessed = self._preprocess_for_ocr(col_img, mode=field)
+                    filename_post = debug_dir / f"{prefix}_{field}_post_{timestamp}.png"
+                    cv2.imwrite(str(filename_post), preprocessed)
+        
+        logger.debug(f"Saved failure crops for {failed_fields} to {debug_dir}")

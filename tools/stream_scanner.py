@@ -76,6 +76,14 @@ class ScannerStreamer:
         self.last_fps_update = time.time()
         self.current_fps = 0.0
         
+        # Segmentation warmup gating
+        self.stable_grid_frames = config_module.STABLE_GRID_FRAMES
+        self.min_expected_rows = config_module.MIN_EXPECTED_ROWS
+        self.expected_num_cols = config_module.EXPECTED_NUM_COLS
+        self.grid_stable_count = 0
+        self.segmentation_ready = False
+        self.last_grid_stats = None
+        
         # Timing
         self.scan_interval = config_module.SCAN_INTERVAL_MS / 1000.0  # Convert to seconds
         
@@ -118,6 +126,18 @@ class ScannerStreamer:
                 
                 # Segment rows
                 rows = self.row_segmenter.segment_rows(roi_img)
+                
+                if not rows:
+                    logger.debug("No rows detected in ROI")
+                    continue
+                
+                # Check grid stability for warmup gating
+                grid_ready = self._check_grid_stability(len(rows))
+                
+                if not grid_ready:
+                    # Segmentation not ready yet, skip event processing
+                    logger.debug(f"Grid warmup: {self.grid_stable_count}/{self.stable_grid_frames} stable frames")
+                    continue
                 
                 # Check for new top rows
                 new_rows = self.row_tracker.check_new_rows(rows, roi_img)
@@ -335,6 +355,43 @@ class ScannerStreamer:
             cv2.imwrite(str(gap_file), columns['gap'])
         
         logger.debug(f"Saved debug images for event {event_id}")
+    
+    def _check_grid_stability(self, num_rows: int) -> bool:
+        """
+        Check if segmentation grid is stable enough for OCR
+        
+        Args:
+            num_rows: Number of rows detected
+            
+        Returns:
+            True if grid is stable and ready
+        """
+        # Current grid stats
+        current_stats = {
+            'num_rows': num_rows,
+            # We only check rows for now; could add column count if column_slicer exposes it
+        }
+        
+        # Check if grid meets minimum criteria
+        grid_valid = (num_rows >= self.min_expected_rows)
+        
+        # Check if grid is same as last frame
+        grid_unchanged = (self.last_grid_stats and 
+                         current_stats['num_rows'] == self.last_grid_stats['num_rows'])
+        
+        if grid_valid and grid_unchanged:
+            self.grid_stable_count += 1
+        else:
+            self.grid_stable_count = 0
+        
+        self.last_grid_stats = current_stats
+        
+        # Mark as ready once we hit the threshold
+        if not self.segmentation_ready and self.grid_stable_count >= self.stable_grid_frames:
+            self.segmentation_ready = True
+            logger.info(f"✓ Segmentation ready: {num_rows} rows stable for {self.stable_grid_frames} frames")
+        
+        return self.segmentation_ready
     
     def _update_fps(self):
         """Update FPS counter"""
