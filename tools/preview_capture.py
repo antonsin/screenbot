@@ -5,6 +5,7 @@ Live preview tool for visual verification of capture region
 Usage:
     python tools/preview_capture.py --view crop   # Show only captured region (default)
     python tools/preview_capture.py --view full   # Show full screen with overlay
+    python tools/preview_capture.py --view full --select-roi  # Select and save ROI interactively
 
 Hotkeys:
     q - Quit
@@ -13,6 +14,7 @@ Hotkeys:
 import sys
 import argparse
 import time
+import json
 from pathlib import Path
 from datetime import datetime
 
@@ -36,14 +38,16 @@ logger = logging.getLogger(__name__)
 class CapturePreview:
     """Visual preview of capture region"""
     
-    def __init__(self, view_mode: str = "crop"):
+    def __init__(self, view_mode: str = "crop", select_roi: bool = False):
         """
         Initialize preview
         
         Args:
             view_mode: "crop" or "full"
+            select_roi: If True, allow ROI selection
         """
         self.view_mode = view_mode
+        self.select_roi = select_roi
         self.frame_source = FrameSource(config)
         self.fps = 0
         self.frame_count = 0
@@ -149,8 +153,95 @@ class CapturePreview:
         cv2.imwrite(str(filename), frame)
         logger.info(f"Screenshot saved: {filename}")
     
+    def _save_region_config(self, x: int, y: int, w: int, h: int):
+        """
+        Save selected ROI to config/region.json
+        
+        Args:
+            x, y, w, h: Region coordinates
+        """
+        # Ensure config directory exists
+        config_dir = config.BASE_DIR / "config"
+        config_dir.mkdir(exist_ok=True)
+        
+        region_data = {
+            "capture_mode": "absolute",
+            "abs_x": int(x),
+            "abs_y": int(y),
+            "abs_w": int(w),
+            "abs_h": int(h),
+            "created_at": datetime.now().isoformat()
+        }
+        
+        region_file = config_dir / "region.json"
+        with open(region_file, 'w') as f:
+            json.dump(region_data, f, indent=2)
+        
+        logger.info(f"✓ Region saved to: {region_file}")
+        logger.info(f"✓ Coordinates: x={x}, y={y}, w={w}, h={h}")
+        print(f"\n{'='*60}")
+        print(f"ROI SAVED SUCCESSFULLY")
+        print(f"{'='*60}")
+        print(f"File: {region_file}")
+        print(f"Coordinates:")
+        print(f"  X: {x}")
+        print(f"  Y: {y}")
+        print(f"  Width: {w}")
+        print(f"  Height: {h}")
+        print(f"{'='*60}\n")
+    
+    def select_roi_interactive(self):
+        """
+        Interactive ROI selection using OpenCV
+        
+        Returns:
+            Tuple of (x, y, w, h) or None if cancelled
+        """
+        logger.info("=" * 60)
+        logger.info("INTERACTIVE ROI SELECTION")
+        logger.info("=" * 60)
+        logger.info("Instructions:")
+        logger.info("  1. Drag to select the scan region")
+        logger.info("  2. Press ENTER to confirm")
+        logger.info("  3. Press C to cancel")
+        logger.info("=" * 60)
+        
+        # Capture full screen
+        screen_w, screen_h = self.frame_source.get_screen_size()
+        frame = self.frame_source.backend.capture(0, 0, screen_w, screen_h)
+        
+        # Ensure frame is OpenCV-compatible
+        frame = np.ascontiguousarray(frame)
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        frame = frame.copy()
+        
+        # Use cv2.selectROI for interactive selection
+        window_name = "Select ROI - Press ENTER to confirm, C to cancel"
+        roi = cv2.selectROI(window_name, frame, showCrosshair=True, fromCenter=False)
+        cv2.destroyWindow(window_name)
+        
+        x, y, w, h = roi
+        
+        # Check if selection was cancelled (all zeros)
+        if w == 0 or h == 0:
+            logger.warning("ROI selection cancelled")
+            return None
+        
+        logger.info(f"ROI selected: x={x}, y={y}, w={w}, h={h}")
+        return (int(x), int(y), int(w), int(h))
+    
     def run(self):
         """Run preview loop"""
+        # If ROI selection mode, run selection and exit
+        if self.select_roi:
+            roi = self.select_roi_interactive()
+            if roi:
+                x, y, w, h = roi
+                self._save_region_config(x, y, w, h)
+            self.frame_source.close()
+            return
+        
         window_name = f"ScreenBot Preview - {self.view_mode.upper()} mode"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         
@@ -215,10 +306,15 @@ def main():
         default="crop",
         help="View mode: 'crop' shows captured region only, 'full' shows entire screen with overlay"
     )
+    parser.add_argument(
+        "--select-roi",
+        action="store_true",
+        help="Interactive ROI selection mode - select and save capture region"
+    )
     
     args = parser.parse_args()
     
-    preview = CapturePreview(view_mode=args.view)
+    preview = CapturePreview(view_mode=args.view, select_roi=args.select_roi)
     preview.run()
 
 

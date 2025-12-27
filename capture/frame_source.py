@@ -3,7 +3,9 @@ Frame source - unified interface for screen capture with mode selection
 """
 import logging
 import platform
+import json
 from typing import Optional
+from pathlib import Path
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -28,11 +30,48 @@ class FrameSource:
         self.backend_name = None
         self.capture_mode = config.CAPTURE_MODE
         
+        # Load region override if exists
+        self._load_region_override()
+        
         # Initialize capture backend
         self._init_backend()
         
         # Cache for window position (used in window mode)
         self._window_rect = None
+    
+    def _load_region_override(self):
+        """
+        Load region.json if it exists and override config values
+        """
+        region_file = self.config.BASE_DIR / "config" / "region.json"
+        
+        if region_file.exists():
+            try:
+                with open(region_file, 'r') as f:
+                    region_data = json.load(f)
+                
+                # Override config values
+                if "capture_mode" in region_data:
+                    self.capture_mode = region_data["capture_mode"]
+                
+                if "abs_x" in region_data:
+                    self.config.ABS_X = region_data["abs_x"]
+                if "abs_y" in region_data:
+                    self.config.ABS_Y = region_data["abs_y"]
+                if "abs_w" in region_data:
+                    self.config.ABS_W = region_data["abs_w"]
+                if "abs_h" in region_data:
+                    self.config.ABS_H = region_data["abs_h"]
+                
+                logger.info(f"✓ Loaded region override from: {region_file}")
+                logger.info(f"  Mode: {self.capture_mode}")
+                logger.info(f"  Region: x={self.config.ABS_X}, y={self.config.ABS_Y}, "
+                           f"w={self.config.ABS_W}, h={self.config.ABS_H}")
+            
+            except Exception as e:
+                logger.warning(f"Failed to load region.json: {e}, using config.py defaults")
+        else:
+            logger.debug(f"No region override found at {region_file}, using config.py defaults")
     
     def _init_backend(self):
         """Initialize the capture backend based on configuration"""

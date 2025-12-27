@@ -28,6 +28,9 @@ logs/*.log
 debug_frames/*.png
 debug_frames/*.jpg
 
+# User-specific region config
+config/region.json
+
 # OS
 .DS_Store
 Thumbs.db
