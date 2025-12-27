@@ -66,6 +66,15 @@ class CapturePreview:
     
     def _draw_overlay_text(self, frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
         """Draw information overlay on frame"""
+        # Ensure frame is OpenCV-compatible (C-contiguous, writable, BGR format)
+        frame = np.ascontiguousarray(frame)
+        
+        # Convert BGRA to BGR if needed (4 channels -> 3 channels)
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        
+        # Create writable copy
+        frame = frame.copy()
         overlay = frame.copy()
         
         # Information to display
@@ -97,6 +106,16 @@ class CapturePreview:
     
     def _draw_capture_rectangle(self, frame: np.ndarray, x: int, y: int, w: int, h: int) -> np.ndarray:
         """Draw capture region rectangle on full screen"""
+        # Ensure frame is OpenCV-compatible (C-contiguous, writable, BGR format)
+        frame = np.ascontiguousarray(frame)
+        
+        # Convert BGRA to BGR if needed (4 channels -> 3 channels)
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        
+        # Create writable copy
+        frame = frame.copy()
+        
         # Draw rectangle
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
         
