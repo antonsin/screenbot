@@ -120,6 +120,11 @@ DATA_DIR.mkdir(exist_ok=True)
 # ==============================
 # SECRETS (loaded from .env)
 # ==============================
+# Tesseract OCR path (optional, falls back to PATH)
+# Windows example: C:\Program Files\Tesseract-OCR\tesseract.exe
+# Linux example: /usr/bin/tesseract
+TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")
+
 # Alpaca API credentials (for future trading implementation)
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")

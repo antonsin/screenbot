@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import re
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,19 @@ class OCRParser:
         self.force_ocr = config.FORCE_OCR
         self.ocr_only_if_gap_green = config.OCR_ONLY_IF_GAP_GREEN
         self.symbol_regex = re.compile(config.SYMBOL_REGEX)
+        
+        # Configure Tesseract path if specified
+        if TESSERACT_AVAILABLE and config.TESSERACT_CMD:
+            tesseract_path = Path(config.TESSERACT_CMD)
+            if tesseract_path.exists():
+                import pytesseract
+                pytesseract.pytesseract.tesseract_cmd = str(tesseract_path)
+                logger.info(f"Using explicit Tesseract path: {tesseract_path}")
+            else:
+                logger.warning(f"TESSERACT_CMD set but file not found: {tesseract_path}")
+                logger.info("Falling back to PATH for Tesseract")
+        elif TESSERACT_AVAILABLE:
+            logger.info("Using Tesseract from PATH")
         
         if not TESSERACT_AVAILABLE and config.ENABLE_OCR:
             logger.warning("OCR is enabled in config but pytesseract is not available")

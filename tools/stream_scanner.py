@@ -163,21 +163,32 @@ class ScannerStreamer:
         
         # Run OCR if gating allows
         if should_ocr:
-            ocr_result = self.ocr_parser.parse_row(columns)
-            event_data.update(ocr_result)
+            try:
+                ocr_result = self.ocr_parser.parse_row(columns)
+                event_data.update(ocr_result)
+            except Exception as e:
+                logger.error(f"OCR parsing failed: {e}", exc_info=True)
+                event_data['notes'] = f"OCR error: {str(e)}"
+                event_data['parsed'] = False
         else:
             event_data['notes'] = f"OCR skipped: gap_color={gap_color_bucket}"
         
-        # Save event to database
-        event_id = self.store.insert_event(event_data)
+        # Save event to database (wrap in try-catch to prevent crash)
+        try:
+            event_id = self.store.insert_event(event_data)
+        except Exception as e:
+            logger.error(f"Failed to insert event: {e}", exc_info=True)
+            event_id = 0
         
-        # Update ticker state if we have a symbol
+        # Update ticker state if we have a symbol (wrap in try-catch)
+        appearances_60s = 0
         if event_data.get('symbol'):
-            self.store.update_ticker_state(event_data['symbol'], event_data)
-            ticker_state = self.store.get_ticker_state(event_data['symbol'])
-            appearances_60s = ticker_state.get('appearances_60s', 0) if ticker_state else 0
-        else:
-            appearances_60s = 0
+            try:
+                self.store.update_ticker_state(event_data['symbol'], event_data)
+                ticker_state = self.store.get_ticker_state(event_data['symbol'])
+                appearances_60s = ticker_state.get('appearances_60s', 0) if ticker_state else 0
+            except Exception as e:
+                logger.error(f"Failed to update ticker state: {e}", exc_info=True)
         
         # Calculate event latency
         event_latency = (time.time() - event_start) * 1000  # ms
@@ -185,9 +196,12 @@ class ScannerStreamer:
         # Print concise event line
         self._print_event(event_data, appearances_60s, event_latency, event_id)
         
-        # Save debug images if enabled
+        # Save debug images if enabled (wrap in try-catch)
         if self.config.EVENT_IMAGE_DEBUG:
-            self._save_debug_images(event_id, roi_img, row_img, columns)
+            try:
+                self._save_debug_images(event_id, roi_img, row_img, columns)
+            except Exception as e:
+                logger.error(f"Failed to save debug images: {e}", exc_info=True)
         
         self.event_count += 1
     
@@ -203,17 +217,24 @@ class ScannerStreamer:
         """
         timestamp = datetime.now().strftime("%I:%M:%S %p")
         
-        symbol = event_data.get('symbol', 'UNKNOWN')
+        # Safe extraction with fallback to placeholders
+        symbol = event_data.get('symbol') or 'UNKNOWN'
         price = event_data.get('price')
-        gap_color = event_data['gap_color_bucket']
+        gap_color = event_data.get('gap_color_bucket', 'UNKNOWN')
         hits = event_data.get('hits_5s')
         parsed = 1 if event_data.get('parsed') else 0
         
-        # Format price
-        price_str = f"${price:.2f}" if price else "N/A"
+        # Format price (handle None safely)
+        try:
+            price_str = f"${price:.2f}" if price is not None else "N/A"
+        except (TypeError, ValueError):
+            price_str = "N/A"
         
-        # Format hits
-        hits_str = f"{hits}" if hits else "N/A"
+        # Format hits (handle None safely)
+        try:
+            hits_str = f"{hits}" if hits is not None else "N/A"
+        except (TypeError, ValueError):
+            hits_str = "N/A"
         
         # Color code based on gap color
         if gap_color == 'GREEN':
@@ -222,6 +243,9 @@ class ScannerStreamer:
             color_indicator = "🔴"
         else:
             color_indicator = "⚪"
+        
+        # Ensure symbol is safe for printing
+        symbol = str(symbol)[:6] if symbol else "UNKNOWN"
         
         print(f"{color_indicator} {timestamp} {symbol:6s} price={price_str:8s} gap={gap_color:7s} "
               f"hits={hits_str:3s} app60={appearances_60s:2d} parsed={parsed} "
