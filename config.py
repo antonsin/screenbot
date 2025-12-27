@@ -64,6 +64,60 @@ REL_H = 600
 TARGET_FPS = 10
 
 # ==============================
+# SCANNER TRACKING
+# ==============================
+# Scan interval (milliseconds between captures)
+SCAN_INTERVAL_MS = 100  # 10 fps
+
+# Maximum top rows to check for new entries
+MAX_TOP_ROWS_TO_CHECK = 3
+
+# Row segmentation (horizontal line detection)
+ROW_LINE_MIN_LENGTH_PCT = 0.75  # Minimum line length as % of width
+ROW_LINE_THICKNESS_PX = 1  # Expected line thickness
+
+# Debug settings
+ROW_SEGMENT_DEBUG = True  # Save segmentation debug images
+EVENT_IMAGE_DEBUG = True  # Save event debug images
+
+# ==============================
+# COLUMN BOUNDARIES (% of ROI width)
+# ==============================
+COL_TIME_HITS = (0.00, 0.22)  # Time and hits column
+COL_SYMBOL = (0.22, 0.42)     # Symbol column
+COL_PRICE = (0.42, 0.52)      # Price column
+COL_GAP = (0.70, 0.78)        # Gap % column
+
+# ==============================
+# GAP COLOR CLASSIFICATION (HSV)
+# ==============================
+# Green hue range (degrees in 0-180 scale used by OpenCV)
+GAP_GREEN_HUE_RANGE = (35, 95)  # Green hues
+
+# Minimum saturation and value for color detection
+GAP_MIN_SAT = 40
+GAP_MIN_VAL = 40
+
+# ==============================
+# OCR SETTINGS
+# ==============================
+ENABLE_OCR = True  # Enable OCR parsing
+OCR_ONLY_IF_GAP_GREEN = True  # Only OCR when gap is green (speed optimization)
+FORCE_OCR = False  # If True, override gating and always OCR
+
+# Symbol validation regex
+SYMBOL_REGEX = r"^[A-Z]{1,5}(\.[A-Z])?$"
+
+# ==============================
+# STORAGE
+# ==============================
+DATA_DIR = BASE_DIR / "data"
+DB_PATH = DATA_DIR / "screenbot.db"
+
+# Ensure data directory exists
+DATA_DIR.mkdir(exist_ok=True)
+
+# ==============================
 # SECRETS (loaded from .env)
 # ==============================
 # Alpaca API credentials (for future trading implementation)

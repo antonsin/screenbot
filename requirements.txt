@@ -14,7 +14,8 @@ python-dotenv>=1.0.0
 # Windows window management
 pywin32>=306; sys_platform == 'win32'
 
+# OCR (optional but recommended)
+pytesseract>=0.3.10
+
 # Future dependencies (for upcoming chunks)
-# pytesseract>=0.3.10  # OCR
-# Pillow>=10.0.0  # Image processing
 # alpaca-py>=0.8.0  # Trading API
