@@ -4,6 +4,14 @@ Configuration for ScreenBot - momentum trading scanner
 import os
 from pathlib import Path
 
+# Load .env file if available (optional)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    import logging
+    logging.getLogger(__name__).warning("python-dotenv not installed, .env file will not be loaded automatically")
+
 # ==============================
 # PATHS
 # ==============================
@@ -75,6 +83,7 @@ MAX_TOP_ROWS_TO_CHECK = 3
 # Row segmentation (horizontal line detection)
 ROW_LINE_MIN_LENGTH_PCT = 0.75  # Minimum line length as % of width
 ROW_LINE_THICKNESS_PX = 1  # Expected line thickness
+MIN_ROWS = 3  # Minimum expected rows for fallback logic
 
 # Debug settings
 ROW_SEGMENT_DEBUG = True  # Save segmentation debug images
