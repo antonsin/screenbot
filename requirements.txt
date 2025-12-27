@@ -1,0 +1,20 @@
+# ScreenBot Requirements
+# Cross-platform momentum trading bot with screen capture
+
+# Core dependencies
+numpy>=1.24.0
+opencv-python>=4.8.0
+mss>=9.0.0
+python-dotenv>=1.0.0
+
+# Windows-only (optional, will auto-fallback to MSS)
+# Install separately on Windows: pip install dxcam
+# dxcam>=0.0.5
+
+# Windows window management
+pywin32>=306; sys_platform == 'win32'
+
+# Future dependencies (for upcoming chunks)
+# pytesseract>=0.3.10  # OCR
+# Pillow>=10.0.0  # Image processing
+# alpaca-py>=0.8.0  # Trading API
