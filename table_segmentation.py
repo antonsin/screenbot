@@ -119,46 +119,123 @@ def detect_grid_lines(binary: np.ndarray) -> Tuple[List[int], List[int]]:
     return y_separators, x_separators
 
 
-def fallback_projection_separators(binary: np.ndarray, axis: int = 0, min_separators: int = 2) -> List[int]:
+def fallback_projection_separators(
+    binary: np.ndarray, 
+    axis: int = 0, 
+    min_separators: int = 2,
+    min_distance_px: int = None
+) -> List[int]:
     """
     Fallback method using projection to find separators
     
-    Uses valleys in projection histogram to detect row/column boundaries
+    Uses valleys in projection histogram to detect row/column boundaries.
+    Clusters nearby valleys and enforces minimum distance constraints.
     
     Args:
         binary: Binary image
         axis: 0 for horizontal (row separators), 1 for vertical (column separators)
         min_separators: Minimum number of separators to find
+        min_distance_px: Minimum distance between separators (default: 18px for rows, 80px for cols)
         
     Returns:
         List of separator positions
     """
+    # Set default min_distance based on axis
+    if min_distance_px is None:
+        if axis == 0:
+            # Row separators: smaller distance for typical UI fonts
+            min_distance_px = 18
+        else:
+            # Column separators: larger distance
+            min_distance_px = 80
+    
     # Project along axis
     projection = np.sum(binary, axis=axis)
+    length = len(projection)
+    
+    # Smooth projection to reduce noise
+    window_size = max(5, min(21, length // 50))
+    kernel = np.ones(window_size) / window_size
+    smoothed = np.convolve(projection, kernel, mode='same')
     
     # Find valleys (low points in projection)
     # These represent gaps between rows/columns
-    threshold = np.mean(projection) * 0.3
+    threshold = np.mean(smoothed) * 0.3
     
-    separators = []
+    # Find all valley candidates with their depths
+    valley_candidates = []  # List of (position, depth)
     in_valley = False
     valley_start = 0
+    valley_min_pos = 0
+    valley_min_val = float('inf')
     
-    for i, val in enumerate(projection):
+    for i, val in enumerate(smoothed):
         if val < threshold and not in_valley:
             in_valley = True
             valley_start = i
-        elif val >= threshold and in_valley:
-            in_valley = False
-            # Use middle of valley
-            separators.append((valley_start + i) // 2)
+            valley_min_pos = i
+            valley_min_val = val
+        elif in_valley:
+            # Track minimum position within valley
+            if val < valley_min_val:
+                valley_min_val = val
+                valley_min_pos = i
+            
+            if val >= threshold:
+                # Exiting valley
+                in_valley = False
+                # Use the deepest point of the valley
+                valley_candidates.append((valley_min_pos, valley_min_val))
     
-    # If not enough separators, try dividing uniformly
+    # Sort by position
+    valley_candidates.sort(key=lambda x: x[0])
+    
+    # Merge nearby valleys - keep one representative per cluster
+    separators = []
+    if valley_candidates:
+        # Start with first valley
+        current_cluster = [valley_candidates[0]]
+        
+        for i in range(1, len(valley_candidates)):
+            pos, depth = valley_candidates[i]
+            last_pos, _ = current_cluster[-1]
+            
+            if pos - last_pos < min_distance_px:
+                # Add to current cluster
+                current_cluster.append(valley_candidates[i])
+            else:
+                # Cluster complete - pick deepest valley (lowest value)
+                best = min(current_cluster, key=lambda x: x[1])
+                separators.append(best[0])
+                # Start new cluster
+                current_cluster = [valley_candidates[i]]
+        
+        # Don't forget the last cluster
+        if current_cluster:
+            best = min(current_cluster, key=lambda x: x[1])
+            separators.append(best[0])
+    
+    # Hard cap: if too many separators, downsample by strongest valleys
+    max_separators = 50
+    if len(separators) > max_separators:
+        logger.warning(f"Projection found {len(separators)} separators, downsampling to {max_separators}")
+        # Keep the strongest (deepest) valleys
+        # Create list of (position, depth) for remaining separators
+        sep_with_depths = [(pos, smoothed[pos]) for pos in separators]
+        # Sort by depth (lower is better for valleys)
+        sep_with_depths.sort(key=lambda x: x[1])
+        # Keep top max_separators
+        separators = [pos for pos, _ in sep_with_depths[:max_separators]]
+        separators.sort()
+    
+    # If not enough separators, do uniform splits
     if len(separators) < min_separators:
-        length = len(projection)
-        # Create uniform divisions
+        logger.debug(f"Projection found {len(separators)} separators, creating uniform splits")
         num_divisions = max(min_separators + 1, 5)  # At least 5 sections
         separators = [int(length * i / num_divisions) for i in range(1, num_divisions)]
+    
+    axis_name = "row" if axis == 0 else "column"
+    logger.info(f"Projection fallback produced {len(separators)} {axis_name} separators (min_dist={min_distance_px}px)")
     
     return sorted(set(separators))
 
