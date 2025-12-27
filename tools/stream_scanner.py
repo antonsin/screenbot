@@ -25,6 +25,20 @@ from scanner.ocr_parse import OCRParser
 from scanner.store import ScannerStore
 import logging
 
+# Import table segmentation for debug mode
+if config.DEBUG_SEGMENTATION:
+    try:
+        from table_segmentation import segment_table
+        TABLE_SEGMENTATION_AVAILABLE = True
+        logger = logging.getLogger(__name__)
+        logger.info("Table segmentation debug mode enabled")
+    except ImportError as e:
+        TABLE_SEGMENTATION_AVAILABLE = False
+        logger = logging.getLogger(__name__)
+        logger.warning(f"table_segmentation import failed: {e}")
+else:
+    TABLE_SEGMENTATION_AVAILABLE = False
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -65,6 +79,14 @@ class ScannerStreamer:
         # Timing
         self.scan_interval = config_module.SCAN_INTERVAL_MS / 1000.0  # Convert to seconds
         
+        # Debug segmentation setup
+        self.debug_segmentation_enabled = config_module.DEBUG_SEGMENTATION and TABLE_SEGMENTATION_AVAILABLE
+        self.debug_segmentation_counter = 0
+        if self.debug_segmentation_enabled:
+            self.debug_dir = config_module.BASE_DIR / "debug"
+            self.debug_dir.mkdir(exist_ok=True)
+            logger.info(f"Debug segmentation enabled, output to: {self.debug_dir}")
+        
         logger.info("=" * 60)
         logger.info("Scanner Event Stream Initialized")
         logger.info("=" * 60)
@@ -74,6 +96,7 @@ class ScannerStreamer:
         logger.info(f"OCR enabled: {self.ocr_parser.enabled}")
         logger.info(f"OCR gating: {'GREEN only' if config_module.OCR_ONLY_IF_GAP_GREEN else 'All rows'}")
         logger.info(f"Database: {config_module.DB_PATH}")
+        logger.info(f"Debug segmentation: {self.debug_segmentation_enabled}")
         logger.info("=" * 60)
     
     def run(self):
@@ -88,6 +111,10 @@ class ScannerStreamer:
                 
                 # Capture ROI
                 roi_img = self.frame_source.capture_frame()
+                
+                # Debug: Run table segmentation if enabled
+                if self.debug_segmentation_enabled:
+                    self._debug_table_segmentation(roi_img)
                 
                 # Segment rows
                 rows = self.row_segmenter.segment_rows(roi_img)
@@ -290,6 +317,41 @@ class ScannerStreamer:
             logger.info(f"FPS: {self.current_fps:.1f} | Events: {self.event_count}")
             self.frame_count = 0
             self.last_fps_update = time.time()
+    
+    def _debug_table_segmentation(self, roi_img: np.ndarray):
+        """
+        Debug helper: Run table segmentation and log results
+        
+        Args:
+            roi_img: ROI image to segment
+        """
+        try:
+            # Only run periodically (every 10 frames) to reduce overhead
+            self.debug_segmentation_counter += 1
+            if self.debug_segmentation_counter % 10 != 0:
+                return
+            
+            # Run table segmentation
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            frame_debug_dir = self.debug_dir / f"frame_{timestamp}"
+            
+            binary, ys, xs, cells = segment_table(
+                roi_img,
+                frame_debug_dir,
+                prefer_lines=True,
+                min_rows=2,
+                min_cols=2
+            )
+            
+            # Log results
+            logger.info(f"[DEBUG SEGMENTATION] Frame {self.debug_segmentation_counter}:")
+            logger.info(f"  Y-separators (rows): {len(ys)}")
+            logger.info(f"  X-separators (cols): {len(xs)}")
+            logger.info(f"  Total cells: {len(cells)}")
+            logger.info(f"  Debug output: {frame_debug_dir}")
+            
+        except Exception as e:
+            logger.error(f"Debug segmentation failed: {e}", exc_info=True)
 
 
 def main():

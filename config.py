@@ -125,6 +125,9 @@ DATA_DIR.mkdir(exist_ok=True)
 # Linux example: /usr/bin/tesseract
 TESSERACT_CMD = os.getenv("TESSERACT_CMD", "")
 
+# Debug flags
+DEBUG_SEGMENTATION = os.getenv("DEBUG_SEGMENTATION", "0") == "1"
+
 # Alpaca API credentials (for future trading implementation)
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY", "")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")

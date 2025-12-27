@@ -36,6 +36,10 @@ data/*.db
 data/*.db-journal
 data/*.jsonl
 
+# Debug output (table segmentation, etc.)
+debug/
+debug_*/
+
 # OS
 .DS_Store
 Thumbs.db
