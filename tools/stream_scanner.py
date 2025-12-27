@@ -191,14 +191,39 @@ class ScannerStreamer:
         # Run OCR if gating allows
         if should_ocr:
             try:
-                ocr_result = self.ocr_parser.parse_row(columns)
-                event_data.update(ocr_result)
+                # Save debug crops for every OCR attempt
+                save_debug = self.config.EVENT_IMAGE_DEBUG
+                debug_prefix = f"slot{row_idx}_evt{self.event_count + 1}"
+                
+                ocr_result = self.ocr_parser.parse_row(columns, 
+                                                       save_debug=save_debug, 
+                                                       debug_prefix=debug_prefix)
+                
+                # Update event data with OCR results (handle parsed as int not bool)
+                if 'symbol' in ocr_result:
+                    event_data['symbol'] = ocr_result['symbol']
+                if 'price' in ocr_result:
+                    event_data['price'] = ocr_result['price']
+                if 'hits_5s' in ocr_result:
+                    event_data['hits_5s'] = ocr_result['hits_5s']
+                if 'row_time' in ocr_result:
+                    event_data['row_time'] = ocr_result['row_time']
+                if 'parsed' in ocr_result:
+                    event_data['parsed'] = ocr_result['parsed']
+                if 'raw_text' in ocr_result:
+                    event_data['raw_text'] = ocr_result['raw_text']
+                
+                # Consolidate notes
+                if 'notes' in ocr_result and ocr_result['notes']:
+                    event_data['notes'] = '; '.join(ocr_result['notes']) if isinstance(ocr_result['notes'], list) else str(ocr_result['notes'])
+                
             except Exception as e:
                 logger.error(f"OCR parsing failed: {e}", exc_info=True)
-                event_data['notes'] = f"OCR error: {str(e)}"
-                event_data['parsed'] = False
+                event_data['notes'] = f"OCR exception: {str(e)}"
+                event_data['parsed'] = 0
         else:
             event_data['notes'] = f"OCR skipped: gap_color={gap_color_bucket}"
+            event_data['parsed'] = 0
         
         # Save event to database (wrap in try-catch to prevent crash)
         try:
@@ -249,9 +274,9 @@ class ScannerStreamer:
         price = event_data.get('price')
         gap_color = event_data.get('gap_color_bucket', 'UNKNOWN')
         hits = event_data.get('hits_5s')
-        parsed = 1 if event_data.get('parsed') else 0
+        parsed = event_data.get('parsed', 0)  # 0 or 1 (not bool)
         
-        # Format price (handle None safely)
+        # Format price with 4 decimal places
         try:
             price_str = f"${price:.2f}" if price is not None else "N/A"
         except (TypeError, ValueError):
@@ -274,9 +299,13 @@ class ScannerStreamer:
         # Ensure symbol is safe for printing
         symbol = str(symbol)[:6] if symbol else "UNKNOWN"
         
-        print(f"{color_indicator} {timestamp} {symbol:6s} price={price_str:8s} gap={gap_color:7s} "
+        print(f"{color_indicator} {timestamp} {symbol:6s} price={price_str:12s} gap={gap_color:7s} "
               f"hits={hits_str:3s} app60={appearances_60s:2d} parsed={parsed} "
               f"[{latency_ms:.1f}ms] [id={event_id}]")
+        
+        # If parsing failed, log notes if present
+        if parsed == 0 and event_data.get('notes'):
+            logger.info(f"  └─ Notes: {event_data['notes']}")
     
     def _save_debug_images(self, event_id: int, roi_img: np.ndarray, row_img: np.ndarray, columns: dict):
         """
