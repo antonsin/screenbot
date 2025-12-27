@@ -85,6 +85,12 @@ ROW_LINE_MIN_LENGTH_PCT = 0.75  # Minimum line length as % of width
 ROW_LINE_THICKNESS_PX = 1  # Expected line thickness
 MIN_ROWS = 3  # Minimum expected rows for fallback logic
 
+# Row event suppression (anti-spam)
+ROW_EVENT_COOLDOWN_SEC = float(os.getenv("ROW_EVENT_COOLDOWN_SEC", "1.0"))  # Cooldown between events for same slot
+ROW_FP_SIZE = int(os.getenv("ROW_FP_SIZE", "64"))  # Target width for fingerprint
+ROW_FP_BLUR_K = int(os.getenv("ROW_FP_BLUR_K", "3"))  # Blur kernel size for fingerprint
+ROW_BBOX_JITTER_PX = int(os.getenv("ROW_BBOX_JITTER_PX", "2"))  # Ignore bbox movement below this
+
 # Debug settings
 ROW_SEGMENT_DEBUG = True  # Save segmentation debug images
 EVENT_IMAGE_DEBUG = True  # Save event debug images

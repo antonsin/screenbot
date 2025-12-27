@@ -1,157 +1,214 @@
 """
-Row tracker - hash-based new row detection with time-bounded cache
+Row tracker - stable fingerprint-based row tracking with duplicate suppression
 """
 import cv2
 import numpy as np
 import logging
-import hashlib
-from collections import deque
-from datetime import datetime, timedelta
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class RowSlotState:
+    """State for a specific row slot/index"""
+    last_fp: bytes
+    last_emit_ts: float
+    last_bbox: tuple[int, int, int, int]
+    stable_count: int = 0
+
+
 class RowTracker:
     """
-    Tracks rows using perceptual hashing to detect new entries
+    Tracks rows using stable fingerprinting with duplicate suppression
     """
     
-    def __init__(self, config, max_top_rows: int = 3, cache_ttl_seconds: int = 60, max_cache_size: int = 500):
+    def __init__(self, config, max_top_rows: int = 3):
         """
         Initialize row tracker
         
         Args:
             config: Configuration module
             max_top_rows: Number of top rows to check
-            cache_ttl_seconds: Time to keep hashes in cache
-            max_cache_size: Maximum number of hashes to cache
         """
         self.config = config
         self.max_top_rows = max_top_rows
-        self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
-        self.max_cache_size = max_cache_size
         
-        # Cache: deque of (hash, timestamp) tuples
-        self.seen_hashes = deque(maxlen=max_cache_size)
-        self.hash_set = set()  # For fast lookup
+        # Configuration
+        self.cooldown_sec = config.ROW_EVENT_COOLDOWN_SEC
+        self.fp_size = config.ROW_FP_SIZE
+        self.fp_blur_k = config.ROW_FP_BLUR_K
+        self.bbox_jitter_px = config.ROW_BBOX_JITTER_PX
+        
+        # Per-slot state tracking
+        self.slot_states = {}  # slot_index -> RowSlotState
+        
+        # Statistics for rate-limited logging
+        self.suppressed_count = 0
+        self.emitted_count = 0
+        self.last_stats_log = time.time()
+        
+        logger.info(f"Row tracker initialized: cooldown={self.cooldown_sec}s, "
+                   f"fp_size={self.fp_size}, jitter_threshold={self.bbox_jitter_px}px")
     
     def check_new_rows(self, rows: list[tuple[int, int, int, int]], roi_img: np.ndarray) -> list[dict]:
         """
-        Check top rows for new entries
+        Check top rows for new entries with duplicate suppression
         
         Args:
             rows: List of (x, y, w, h) row boxes
             roi_img: Full ROI image
             
         Returns:
-            List of dicts with new row info: {index, bbox, hash, image}
+            List of dicts with new row info: {index, bbox, hash, image, reason}
         """
-        # Clean old hashes from cache
-        self._cleanup_cache()
-        
         new_rows = []
+        now = time.time()
         
         # Check only top N rows
         check_count = min(self.max_top_rows, len(rows))
         
         for idx in range(check_count):
             x, y, w, h = rows[idx]
+            bbox = (x, y, w, h)
             
             # Extract row image
             row_img = roi_img[y:y+h, x:x+w].copy()
             
-            # Compute hash
-            row_hash = self._compute_row_hash(row_img)
+            # Compute stable fingerprint
+            row_fp = self._fingerprint_row(row_img)
             
-            # Check if this is a new hash
-            if row_hash not in self.hash_set:
-                logger.info(f"New row detected at index {idx}, hash: {row_hash[:12]}...")
+            # Check if we should emit event for this slot
+            should_emit, reason = self._should_emit_event(idx, row_fp, bbox, now)
+            
+            if should_emit:
+                # Create hash string for backward compatibility
+                row_hash = row_fp.hex()[:32]
+                
+                logger.info(f"New row detected at slot {idx} (reason: {reason})")
                 
                 new_rows.append({
                     'index': idx,
-                    'bbox': (x, y, w, h),
+                    'bbox': bbox,
                     'hash': row_hash,
-                    'image': row_img
+                    'image': row_img,
+                    'reason': reason
                 })
                 
-                # Add to cache
-                self._add_to_cache(row_hash)
+                # Update slot state
+                self._update_slot_state(idx, row_fp, bbox, now)
+                
+                self.emitted_count += 1
+            else:
+                self.suppressed_count += 1
+        
+        # Rate-limited stats logging (every 2 seconds)
+        if now - self.last_stats_log >= 2.0:
+            if self.suppressed_count > 0 or self.emitted_count > 0:
+                logger.debug(f"Event stats: emitted={self.emitted_count}, suppressed={self.suppressed_count}")
+                self.suppressed_count = 0
+                self.emitted_count = 0
+            self.last_stats_log = now
         
         return new_rows
     
-    def _compute_row_hash(self, row_img: np.ndarray) -> str:
+    def _fingerprint_row(self, row_img: np.ndarray) -> bytes:
         """
-        Compute perceptual hash of row image
+        Compute stable fingerprint of row image
         
         Args:
             row_img: Row image (BGR)
             
         Returns:
-            Hash string
+            Fingerprint as bytes
         """
-        # Normalize image for consistent hashing
-        # 1. Convert to grayscale
+        # Convert to grayscale
         gray = cv2.cvtColor(row_img, cv2.COLOR_BGR2GRAY)
         
-        # 2. Resize to fixed width for consistency
-        target_width = 256
-        aspect_ratio = gray.shape[1] / gray.shape[0]
-        target_height = int(target_width / aspect_ratio)
+        # Downscale aggressively to target width
+        h, w = gray.shape
+        aspect_ratio = w / h if h > 0 else 1
+        target_width = self.fp_size
+        target_height = max(1, int(target_width / aspect_ratio))
         resized = cv2.resize(gray, (target_width, target_height))
         
-        # 3. Apply slight blur to reduce noise
-        blurred = cv2.GaussianBlur(resized, (3, 3), 0)
+        # Apply slight blur to reduce noise
+        blur_k = self.fp_blur_k if self.fp_blur_k % 2 == 1 else self.fp_blur_k + 1  # Must be odd
+        blurred = cv2.GaussianBlur(resized, (blur_k, blur_k), 0)
         
-        # 4. Compute difference hash (dHash)
-        # This is robust to small changes but sensitive to new content
-        dhash = self._dhash(blurred)
+        # Apply threshold to get stable binary representation
+        _, thresholded = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        return dhash
+        # Pack into bytes (bitstring)
+        bits = (thresholded > 127).flatten()
+        packed = np.packbits(bits)
+        
+        return packed.tobytes()
     
-    def _dhash(self, img: np.ndarray, hash_size: int = 16) -> str:
+    def _should_emit_event(self, slot_idx: int, fp: bytes, bbox: tuple[int, int, int, int], now: float) -> tuple[bool, str]:
         """
-        Compute difference hash (dHash)
+        Determine if event should be emitted for this slot
         
         Args:
-            img: Grayscale image
-            hash_size: Size of hash (16 = 256 bits)
+            slot_idx: Row slot index
+            fp: Fingerprint bytes
+            bbox: Bounding box (x, y, w, h)
+            now: Current timestamp
             
         Returns:
-            Hash as hex string
+            Tuple of (should_emit, reason)
         """
-        # Resize to hash_size + 1 to allow horizontal gradient comparison
-        resized = cv2.resize(img, (hash_size + 1, hash_size))
+        # First time seeing this slot
+        if slot_idx not in self.slot_states:
+            return True, "first_detection"
         
-        # Compute horizontal gradient (difference between adjacent pixels)
-        diff = resized[:, 1:] > resized[:, :-1]
+        state = self.slot_states[slot_idx]
         
-        # Convert boolean array to hash string
-        hash_bytes = np.packbits(diff.flatten())
-        hash_hex = hash_bytes.tobytes().hex()
+        # Check fingerprint change
+        if fp != state.last_fp:
+            return True, "fp_changed"
         
-        return hash_hex
+        # Check bounding box movement
+        x, y, w, h = bbox
+        last_x, last_y, last_w, last_h = state.last_bbox
+        
+        dy = abs(y - last_y)
+        dh = abs(h - last_h)
+        
+        if dy > self.bbox_jitter_px or dh > self.bbox_jitter_px:
+            return True, f"bbox_moved(dy={dy},dh={dh})"
+        
+        # Check cooldown
+        elapsed = now - state.last_emit_ts
+        if elapsed > self.cooldown_sec:
+            return True, f"cooldown_expired({elapsed:.1f}s)"
+        
+        # Suppress - same content, stable position, within cooldown
+        return False, "suppressed"
     
-    def _add_to_cache(self, row_hash: str):
+    def _update_slot_state(self, slot_idx: int, fp: bytes, bbox: tuple[int, int, int, int], now: float):
         """
-        Add hash to cache with timestamp
+        Update state for a slot after emitting event
         
         Args:
-            row_hash: Hash to add
+            slot_idx: Row slot index
+            fp: Fingerprint bytes
+            bbox: Bounding box
+            now: Current timestamp
         """
-        now = datetime.now()
-        self.seen_hashes.append((row_hash, now))
-        self.hash_set.add(row_hash)
-    
-    def _cleanup_cache(self):
-        """
-        Remove expired hashes from cache
-        """
-        now = datetime.now()
-        cutoff = now - self.cache_ttl
-        
-        # Remove old entries
-        while self.seen_hashes and self.seen_hashes[0][1] < cutoff:
-            old_hash, _ = self.seen_hashes.popleft()
-            self.hash_set.discard(old_hash)
-        
-        logger.debug(f"Hash cache size: {len(self.hash_set)}")
+        if slot_idx in self.slot_states:
+            state = self.slot_states[slot_idx]
+            state.last_fp = fp
+            state.last_emit_ts = now
+            state.last_bbox = bbox
+            state.stable_count += 1
+        else:
+            self.slot_states[slot_idx] = RowSlotState(
+                last_fp=fp,
+                last_emit_ts=now,
+                last_bbox=bbox,
+                stable_count=1
+            )
