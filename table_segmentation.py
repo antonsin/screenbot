@@ -444,21 +444,31 @@ def segment_table(
     
     logger.info(f"Line-based detection: {len(ys_lines)} horizontal, {len(xs_lines)} vertical lines")
     
-    # Step 3: Fallback if needed
+    # Step 3: HYBRID separator selection (per-axis fallback)
+    # Always prefer line-based separators when detected, fall back per axis independently
     ys = ys_lines
     xs = xs_lines
+    y_method = "line-based"
+    x_method = "line-based"
     
-    if prefer_lines and (len(ys_lines) >= min_rows and len(xs_lines) >= min_cols):
-        # Use line-based detection
-        method = "line-based"
-    else:
-        # Use projection fallback
-        logger.info("Using projection fallback for separators")
+    # Y-axis (rows): Use projection fallback only if horizontal lines not detected
+    if len(ys_lines) < min_rows:
+        logger.info("Using projection fallback for ROW separators (no horizontal lines detected)")
         ys = fallback_projection_separators(binary, axis=0, min_separators=min_rows)
-        xs = fallback_projection_separators(binary, axis=1, min_separators=min_cols)
-        method = "projection"
+        y_method = "projection"
+    else:
+        logger.info(f"Using line-based separators for ROWS ({len(ys_lines)} horizontal lines)")
     
-    logger.info(f"Final separators ({method}): {len(ys)} rows, {len(xs)} columns")
+    # X-axis (cols): Use projection fallback only if vertical lines not detected
+    if len(xs_lines) < min_cols:
+        logger.info("Using projection fallback for COL separators (no vertical lines detected)")
+        xs = fallback_projection_separators(binary, axis=1, min_separators=min_cols)
+        x_method = "projection"
+    else:
+        logger.info(f"Using line-based separators for COLS ({len(xs_lines)} vertical lines)")
+    
+    logger.info(f"Final separators: rows_seps={len(ys)} (via {y_method}), cols_seps={len(xs)} (via {x_method})")
+    logger.info(f"Grid dimensions: {len(ys)+1} rows × {len(xs)+1} columns")
     
     # Step 4: Build cells
     cells = build_cells_from_separators(h, w, ys, xs)

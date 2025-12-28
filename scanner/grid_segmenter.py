@@ -73,10 +73,70 @@ class GridSegmenter:
             logger.info(f"✓ Grid calibration loaded: {len(self.column_boundaries)-1} columns")
             logger.info(f"  Using calibrated column separators: {len(self.column_boundaries)}")
             logger.info(f"  Semantic mapping: {self.semantic_to_index}")
+            
+            # Validate grid calibration for semantic mapping issues
+            self._validate_grid_calibration(normalized_seps, roi_width)
         
         except Exception as e:
             logger.error(f"Failed to load grid calibration: {e}")
             self.calibration = None
+    
+    def _validate_grid_calibration(self, normalized_seps: list, roi_width: int):
+        """
+        Validate grid calibration and warn about potential miscalibration
+        
+        Args:
+            normalized_seps: List of normalized separator positions (0..1)
+            roi_width: ROI width in pixels
+        """
+        num_cols = len(normalized_seps) + 1  # Number of columns
+        
+        # Check if we have semantic mapping that relies on specific physical columns
+        has_gap_semantic = 'gap' in self.semantic_to_index
+        
+        # If we have few columns but semantic mapping expects more specific columns
+        if num_cols <= 4 and has_gap_semantic:
+            gap_index = self.semantic_to_index['gap']
+            
+            # Check if last column is very wide (> 50% of ROI width)
+            if normalized_seps:
+                last_sep = normalized_seps[-1]
+                last_col_width_ratio = 1.0 - last_sep
+                
+                if last_col_width_ratio > 0.50:
+                    logger.warning("=" * 80)
+                    logger.warning("⚠️  GRID MISCALIBRATION WARNING")
+                    logger.warning("=" * 80)
+                    logger.warning(f"Grid has only {num_cols} columns, but last column occupies {last_col_width_ratio*100:.1f}% of ROI width.")
+                    logger.warning(f"This suggests multiple physical columns are merged into column {num_cols-1}.")
+                    logger.warning("")
+                    logger.warning(f"Semantic mapping expects 'gap' at physical column {gap_index},")
+                    logger.warning("but merged columns will break gap color gating.")
+                    logger.warning("")
+                    logger.warning("RECOMMENDED FIX:")
+                    logger.warning("  1) Re-run: python tools/calibrate_grid.py --gap-col 7")
+                    logger.warning("     to generate a proper 10-column grid with gap at column 7")
+                    logger.warning("")
+                    logger.warning("  OR")
+                    logger.warning("")
+                    logger.warning("  2) Copy config/grid.example.10col.json to config/grid.json")
+                    logger.warning("     as a starting point and adjust separators")
+                    logger.warning("=" * 80)
+            
+            # Also warn if gap_index >= num_cols
+            if gap_index >= num_cols:
+                logger.warning("=" * 80)
+                logger.warning("⚠️  SEMANTIC MAPPING ERROR")
+                logger.warning("=" * 80)
+                logger.warning(f"Semantic mapping expects 'gap' at column {gap_index},")
+                logger.warning(f"but grid only has {num_cols} columns (0-{num_cols-1}).")
+                logger.warning("")
+                logger.warning("This will cause gap color gating to fail (no gap column found).")
+                logger.warning("")
+                logger.warning("RECOMMENDED FIX:")
+                logger.warning("  Re-run: python tools/calibrate_grid.py --gap-col 7")
+                logger.warning("  to generate a proper 10-column grid")
+                logger.warning("=" * 80)
     
     def is_calibrated(self) -> bool:
         """Check if grid is calibrated"""
