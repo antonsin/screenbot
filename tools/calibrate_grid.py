@@ -118,7 +118,7 @@ def auto_suggest_separators(img):
     return suggestions
 
 
-def save_calibration(roi_rect):
+def save_calibration(roi_rect, gap_col_index=None):
     """Save calibration to config/grid.json"""
     config_dir = Path(config.BASE_DIR) / "config"
     config_dir.mkdir(exist_ok=True)
@@ -128,14 +128,24 @@ def save_calibration(roi_rect):
     # Normalize separator positions to 0..1
     normalized_separators = [x / roi_width for x in separators]
     
-    # Define column semantics (static order)
+    # Define column semantics for ALL columns
     num_cols = len(separators) + 1
-    column_semantics = []
-    if num_cols >= 4:
-        column_semantics = ["time_hits", "symbol", "price", "gap"]
-    else:
-        # Generic fallback
-        column_semantics = [f"col{i}" for i in range(num_cols)]
+    column_semantics = [f"col{i}" for i in range(num_cols)]
+    
+    # Define semantic-to-index mapping for key columns
+    # Default assumes first 4 columns for backward compatibility
+    if gap_col_index is None:
+        gap_col_index = min(3, num_cols - 1)  # Default to col 3 or last column
+    
+    semantic_to_index = {
+        "time_hits": 0 if num_cols > 0 else None,
+        "symbol": 1 if num_cols > 1 else None,
+        "price": 2 if num_cols > 2 else None,
+        "gap": gap_col_index
+    }
+    
+    # Remove None entries
+    semantic_to_index = {k: v for k, v in semantic_to_index.items() if v is not None}
     
     calibration_data = {
         "roi_rect": roi_rect,
@@ -143,6 +153,7 @@ def save_calibration(roi_rect):
         "separators_normalized": normalized_separators,
         "separators_absolute": separators,
         "column_semantics": column_semantics,
+        "semantic_to_index": semantic_to_index,
         "num_columns": num_cols,
         "created_at": datetime.now().isoformat(),
         "calibration_method": "manual"
@@ -154,12 +165,19 @@ def save_calibration(roi_rect):
     print(f"\n✓ Calibration saved to: {grid_file}")
     print(f"  Columns: {num_cols}")
     print(f"  Separators: {len(separators)}")
-    print(f"  Column order: {', '.join(column_semantics)}")
+    print(f"  Semantic mapping: {semantic_to_index}")
 
 
 def main():
     """Main calibration UI"""
     global roi_width, separators
+    
+    import argparse
+    parser = argparse.ArgumentParser(description='Grid calibration tool')
+    parser.add_argument('--gap-col', type=int, help='Column index for gap (0-based, default: 3)')
+    args = parser.parse_args()
+    
+    gap_col_index = args.gap_col
     
     print("=" * 60)
     print("Grid Calibration Tool")
@@ -172,6 +190,8 @@ def main():
     print("5. Press 'r' to reset/clear all separators")
     print("6. Press 'Enter' to save and exit")
     print("7. Press 'Esc' to cancel")
+    if gap_col_index is not None:
+        print(f"\nGap column will be set to: {gap_col_index}")
     print("=" * 60)
     
     # Load ROI
@@ -223,7 +243,7 @@ def main():
         
         if key == 13:  # Enter
             if len(separators) > 0:
-                save_calibration(roi_rect)
+                save_calibration(roi_rect, gap_col_index)
                 break
             else:
                 print("No separators defined! Add at least one separator or press 's' for auto-suggest.")

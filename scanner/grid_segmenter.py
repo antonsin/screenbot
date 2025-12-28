@@ -27,6 +27,7 @@ class GridSegmenter:
         self.calibration = None
         self.column_boundaries = None
         self.column_semantics = None
+        self.semantic_to_index = {}  # NEW: Semantic-to-physical-index mapping
         
         # Horizontal delimiter detection parameters
         self.delimiter_color = (128, 128, 128)  # #808080 RGB
@@ -57,8 +58,21 @@ class GridSegmenter:
             self.column_boundaries = [0] + [int(x * roi_width) for x in normalized_seps] + [roi_width]
             self.column_semantics = self.calibration.get('column_semantics', [])
             
+            # Load semantic-to-index mapping (new feature)
+            self.semantic_to_index = self.calibration.get('semantic_to_index', {})
+            
+            # Backward compatibility: if no semantic_to_index, build from first 4 semantics
+            if not self.semantic_to_index and len(self.column_semantics) >= 4:
+                self.semantic_to_index = {
+                    "time_hits": 0,
+                    "symbol": 1,
+                    "price": 2,
+                    "gap": 3
+                }
+            
             logger.info(f"✓ Grid calibration loaded: {len(self.column_boundaries)-1} columns")
-            logger.info(f"  Column order: {', '.join(self.column_semantics)}")
+            logger.info(f"  Using calibrated column separators: {len(self.column_boundaries)}")
+            logger.info(f"  Semantic mapping: {self.semantic_to_index}")
         
         except Exception as e:
             logger.error(f"Failed to load grid calibration: {e}")
@@ -214,6 +228,7 @@ class GridSegmenter:
     def slice_row_by_columns(self, row_img: np.ndarray) -> dict:
         """
         Slice a row image into columns using calibrated boundaries
+        Returns dict with both physical (col0, col1...) and semantic aliases (gap, symbol...)
         
         Args:
             row_img: Row image
@@ -227,6 +242,7 @@ class GridSegmenter:
         columns = {}
         h, w = row_img.shape[:2]
         
+        # Create physical column crops (col0, col1, ...)
         for i in range(len(self.column_boundaries) - 1):
             x1 = self.column_boundaries[i]
             x2 = self.column_boundaries[i + 1]
@@ -236,8 +252,23 @@ class GridSegmenter:
             x2 = max(0, min(x2, w))
             
             if x2 > x1:
-                col_name = self.column_semantics[i] if i < len(self.column_semantics) else f"col{i}"
-                columns[col_name] = row_img[:, x1:x2].copy()
+                col_img = row_img[:, x1:x2].copy()
+                
+                # Always store with generic col{i} key
+                columns[f"col{i}"] = col_img
+                
+                # Also store with semantic name if defined
+                col_name = self.column_semantics[i] if i < len(self.column_semantics) else None
+                if col_name and col_name != f"col{i}":
+                    columns[col_name] = col_img
+        
+        # Add semantic aliases from semantic_to_index mapping
+        for semantic_name, physical_index in self.semantic_to_index.items():
+            if 0 <= physical_index < len(self.column_boundaries) - 1:
+                col_key = f"col{physical_index}"
+                if col_key in columns:
+                    columns[semantic_name] = columns[col_key]
+                    logger.debug(f"Mapped semantic '{semantic_name}' -> physical col{physical_index}")
         
         return columns
     

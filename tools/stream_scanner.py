@@ -224,15 +224,37 @@ class ScannerStreamer:
         
         # Extract gap color features (fast gating)
         gap_cell = columns.get('gap')
-        color_result = self.color_extractor.classify_gap_color(gap_cell)
         
-        gap_color_bucket = color_result['gap_color_bucket']
-        h_mean = color_result['h_mean']
-        s_mean = color_result['s_mean']
-        v_mean = color_result['v_mean']
+        if gap_cell is None:
+            logger.warning(f"Gap column not found in columns dict (keys: {list(columns.keys())})")
+            logger.warning("OCR gating disabled - treating as non-green")
+            gap_color_bucket = 'UNKNOWN'
+            color_result = {
+                'gap_color_bucket': 'UNKNOWN',
+                'h_mean': 0,
+                's_mean': 0,
+                'v_mean': 0
+            }
+        else:
+            color_result = self.color_extractor.classify_gap_color(gap_cell)
+            gap_color_bucket = color_result['gap_color_bucket']
+            
+            # Debug: log gap column info
+            if self.use_grid_segmenter:
+                gap_index = getattr(self.grid_segmenter, 'semantic_to_index', {}).get('gap', 'unknown')
+                logger.debug(f"Gap column: physical_index={gap_index}, color={gap_color_bucket}")
+        
+        h_mean = color_result.get('h_mean', 0)
+        s_mean = color_result.get('s_mean', 0)
+        v_mean = color_result.get('v_mean', 0)
         
         # Determine if OCR should run
         should_ocr = self.ocr_parser.should_run_ocr(gap_color_bucket)
+        
+        # Debug: log OCR gating decision
+        if not should_ocr:
+            logger.debug(f"OCR skipped due to gating: gap_color={gap_color_bucket}, "
+                        f"gate_rule={'GREEN_only' if self.config.OCR_ONLY_IF_GAP_GREEN else 'all'}")
         
         # Initialize event data
         event_data = {
