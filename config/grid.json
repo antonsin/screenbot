@@ -1,0 +1,53 @@
+{
+  "roi_rect": {
+    "x": 865,
+    "y": 887,
+    "w": 689,
+    "h": 486
+  },
+  "roi_width": 689,
+  "separators_normalized": [
+    0.132075,
+    0.232221,
+    0.291727,
+    0.387518,
+    0.473149,
+    0.612482,
+    0.730044,
+    0.812772,
+    0.908563
+  ],
+  "separators_absolute": [
+    91,
+    160,
+    201,
+    267,
+    326,
+    422,
+    503,
+    560,
+    626
+  ],
+  "column_semantics": [
+    "time_hits",
+    "symbol",
+    "price",
+    "volume",
+    "float",
+    "rel_volume_daily_rate",
+    "rel_volume_5min",
+    "gap",
+    "change_from_close",
+    "short_interest"
+  ],
+  "semantic_to_index": {
+    "time_hits": 0,
+    "symbol": 1,
+    "price": 2,
+    "gap": 7
+  },
+  "num_columns": 10,
+  "created_at": "2025-12-28T22:00:00Z",
+  "calibration_method": "manual",
+  "note": "10-column grid calibration matching current UI table structure"
+}

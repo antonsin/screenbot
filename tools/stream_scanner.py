@@ -588,10 +588,41 @@ def main():
     parser = argparse.ArgumentParser(description='Stream scanner events')
     parser.add_argument('--max-seconds', type=int, help='Stop after N seconds')
     parser.add_argument('--max-frames', type=int, help='Stop after N frames')
+    parser.add_argument('--expected-columns', type=int, default=10, 
+                       help='Expected number of columns in grid (default: 10)')
+    parser.add_argument('--debug-segmentation', action='store_true',
+                       help='Enable debug segmentation overlays')
     
     args = parser.parse_args()
     
+    # Override config if debug segmentation requested via CLI
+    if args.debug_segmentation:
+        config.DEBUG_SEGMENTATION = True
+    
     streamer = ScannerStreamer(config)
+    
+    # Validate grid calibration if expected
+    if args.expected_columns and streamer.use_grid_segmenter:
+        actual_columns = streamer.grid_segmenter.num_columns
+        if actual_columns != args.expected_columns:
+            logger.error("=" * 80)
+            logger.error("❌ GRID CALIBRATION MISMATCH")
+            logger.error("=" * 80)
+            logger.error(f"Expected columns: {args.expected_columns}")
+            logger.error(f"Loaded columns:   {actual_columns}")
+            logger.error(f"Grid file path:   {streamer.grid_segmenter.grid_file_path}")
+            logger.error(f"Column semantics: {streamer.grid_segmenter.column_semantics}")
+            logger.error("")
+            logger.error("The loaded grid calibration does not match expectations.")
+            logger.error("This will cause semantic mapping errors and failed gap gating.")
+            logger.error("")
+            logger.error("REQUIRED ACTION:")
+            logger.error(f"  1) Verify config/grid.json has {args.expected_columns} columns")
+            logger.error("  2) Or re-run: python tools/calibrate_grid.py --gap-col 7")
+            logger.error("  3) Or adjust --expected-columns to match your actual grid")
+            logger.error("=" * 80)
+            raise SystemExit(1)
+    
     streamer.run(max_seconds=args.max_seconds, max_frames=args.max_frames)
 
 

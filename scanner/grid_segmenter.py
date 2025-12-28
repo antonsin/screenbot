@@ -37,9 +37,21 @@ class GridSegmenter:
         # Load calibration
         self._load_calibration()
     
-    def _load_calibration(self):
-        """Load grid calibration from config/grid.json"""
-        grid_file = self.config.BASE_DIR / "config" / "grid.json"
+    def _load_calibration(self, grid_path=None):
+        """
+        Load grid calibration from config/grid.json
+        
+        Args:
+            grid_path: Optional explicit path to grid.json. If None, uses config/grid.json
+        """
+        # Resolve grid file path from repo root (using __file__ not CWD)
+        if grid_path is None:
+            # Default: config/grid.json relative to this module's parent directory
+            module_dir = Path(__file__).resolve().parent  # scanner/
+            repo_root = module_dir.parent  # workspace/
+            grid_file = repo_root / "config" / "grid.json"
+        else:
+            grid_file = Path(grid_path).resolve()
         
         if not grid_file.exists():
             logger.warning(f"Grid calibration not found: {grid_file}")
@@ -53,6 +65,7 @@ class GridSegmenter:
             # Build absolute column boundaries for current ROI
             roi_width = self.calibration.get('roi_width')
             normalized_seps = self.calibration.get('separators_normalized', [])
+            num_columns = self.calibration.get('num_columns', len(normalized_seps) + 1)
             
             # Boundaries: [0, sep1, sep2, ..., width]
             self.column_boundaries = [0] + [int(x * roi_width) for x in normalized_seps] + [roi_width]
@@ -70,9 +83,15 @@ class GridSegmenter:
                     "gap": 3
                 }
             
-            logger.info(f"✓ Grid calibration loaded: {len(self.column_boundaries)-1} columns")
-            logger.info(f"  Using calibrated column separators: {len(self.column_boundaries)}")
+            # Log absolute path and summary
+            logger.info(f"✓ Loaded grid calibration from: {grid_file.absolute()}")
+            logger.info(f"  Grid calibration loaded: {len(self.column_boundaries)-1} columns")
+            logger.info(f"  Column semantics: {self.column_semantics}")
             logger.info(f"  Semantic mapping: {self.semantic_to_index}")
+            
+            # Store for validation
+            self.grid_file_path = grid_file.absolute()
+            self.num_columns = len(self.column_boundaries) - 1
             
             # Validate grid calibration for semantic mapping issues
             self._validate_grid_calibration(normalized_seps, roi_width)
