@@ -540,7 +540,7 @@ class ScannerStreamer:
         elapsed = time.time() - self.last_fps_update
         if elapsed >= 5.0:  # Update every 5 seconds
             self.current_fps = self.frame_count / elapsed
-            logger.info(f"FPS: {self.current_fps:.1f} | Events: {self.event_count}")
+            logger.info(f"FPS: {self.current_fps:.1f} | Events: {self.events_emitted}")
             self.frame_count = 0
             self.last_fps_update = time.time()
     
