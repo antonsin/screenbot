@@ -328,6 +328,88 @@ def draw_overlay(raw_bgr: np.ndarray, ys: List[int], xs: List[int], cells: List[
     return overlay
 
 
+def draw_overlay_thick(raw_bgr: np.ndarray, ys: List[int], xs: List[int]) -> np.ndarray:
+    """
+    Draw separator lines with thick lines for easier visibility
+    
+    Args:
+        raw_bgr: Original BGR image
+        ys: Y-coordinate separators
+        xs: X-coordinate separators
+        
+    Returns:
+        Annotated BGR image
+    """
+    overlay = raw_bgr.copy()
+    h, w = overlay.shape[:2]
+    
+    # Draw horizontal separators (thick, green)
+    for y in ys:
+        cv2.line(overlay, (0, y), (w, y), (0, 255, 0), 3)
+    
+    # Draw vertical separators (thick, blue)
+    for x in xs:
+        cv2.line(overlay, (x, 0), (x, h), (255, 0, 0), 3)
+    
+    return overlay
+
+
+def draw_overlay_indexed(raw_bgr: np.ndarray, ys: List[int], xs: List[int], cells: List[Rect]) -> np.ndarray:
+    """
+    Draw cell bounding boxes with row/col indices
+    
+    Args:
+        raw_bgr: Original BGR image
+        ys: Y-coordinate separators
+        xs: X-coordinate separators
+        cells: List of cell rectangles
+        
+    Returns:
+        Image with indexed cells
+    """
+    overlay = raw_bgr.copy()
+    h, w = overlay.shape[:2]
+    
+    num_rows = len(ys) - 1 if len(ys) > 1 else 0
+    num_cols = len(xs) - 1 if len(xs) > 1 else 0
+    
+    # Draw each cell with index
+    for idx, cell in enumerate(cells):
+        # Calculate row and col from index
+        if num_cols > 0:
+            row = idx // num_cols
+            col = idx % num_cols
+        else:
+            row = idx
+            col = 0
+        
+        # Draw cell bounding box (orange)
+        cv2.rectangle(overlay, (cell.x, cell.y), 
+                     (cell.x + cell.w, cell.y + cell.h), 
+                     (0, 165, 255), 1)
+        
+        # Draw index text (small font)
+        text = f"R{row}C{col}"
+        font_scale = 0.35
+        thickness = 1
+        (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        
+        # Position text in top-left of cell
+        text_x = cell.x + 2
+        text_y = cell.y + text_h + 2
+        
+        # Draw background rectangle for text
+        cv2.rectangle(overlay, (text_x - 1, text_y - text_h - 1),
+                     (text_x + text_w + 1, text_y + 1),
+                     (255, 255, 255), -1)
+        
+        # Draw text
+        cv2.putText(overlay, text, (text_x, text_y),
+                   cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness)
+    
+    return overlay
+
+
 def segment_table(
     raw_bgr: np.ndarray,
     debug_dir: Path,
@@ -389,9 +471,17 @@ def segment_table(
     # Save binary
     cv2.imwrite(str(debug_dir / "bin.png"), binary)
     
-    # Save overlay
+    # Save overlay (thin lines)
     overlay = draw_overlay(raw_bgr, ys, xs, cells)
     cv2.imwrite(str(debug_dir / "overlay.png"), overlay)
+    
+    # Save overlay with thick lines (easier to see)
+    overlay_thick = draw_overlay_thick(raw_bgr, ys, xs)
+    cv2.imwrite(str(debug_dir / "overlay_thick.png"), overlay_thick)
+    
+    # Save indexed overlay (with row/col labels)
+    overlay_indexed = draw_overlay_indexed(raw_bgr, ys, xs, cells)
+    cv2.imwrite(str(debug_dir / "overlay_indexed.png"), overlay_indexed)
     
     # Save line detection results
     horizontal_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (w // 4, 1))

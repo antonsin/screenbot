@@ -107,15 +107,34 @@ class ScannerStreamer:
         logger.info(f"Debug segmentation: {self.debug_segmentation_enabled}")
         logger.info("=" * 60)
     
-    def run(self):
+    def run(self, max_seconds=None, max_frames=None):
         """
-        Main event loop
+        Main event loop with optional time/frame limits
+        
+        Args:
+            max_seconds: Maximum seconds to run (None = infinite)
+            max_frames: Maximum frames to process (None = infinite)
         """
         logger.info("Starting scanner stream... Press Ctrl+C to stop")
+        
+        if max_seconds:
+            logger.info(f"Will stop after {max_seconds} seconds")
+        if max_frames:
+            logger.info(f"Will stop after {max_frames} frames")
+        
+        start_time = time.time()
         
         try:
             while True:
                 loop_start = time.time()
+                
+                # Check limits
+                if max_seconds and (time.time() - start_time) >= max_seconds:
+                    logger.info(f"Reached time limit: {max_seconds}s")
+                    break
+                if max_frames and self.frame_count >= max_frames:
+                    logger.info(f"Reached frame limit: {max_frames}")
+                    break
                 
                 # Capture ROI
                 roi_img = self.frame_source.capture_frame()
@@ -218,6 +237,9 @@ class ScannerStreamer:
                 ocr_result = self.ocr_parser.parse_row(columns, 
                                                        save_debug=save_debug, 
                                                        debug_prefix=debug_prefix)
+                
+                # ALWAYS save crops that will be OCR'd to ocr_samples for verification
+                self._save_ocr_samples(columns, row_idx, self.event_count + 1)
                 
                 # Update event data with OCR results (handle parsed as int not bool)
                 if 'symbol' in ocr_result:
@@ -327,6 +349,39 @@ class ScannerStreamer:
         if parsed == 0 and event_data.get('notes'):
             logger.info(f"  └─ Notes: {event_data['notes']}")
     
+    def _save_ocr_samples(self, columns: dict, slot_idx: int, event_id: int):
+        """
+        Save exact crops that will be OCR'd for verification
+        
+        Args:
+            columns: Column images dict
+            slot_idx: Row slot index
+            event_id: Event ID
+        """
+        debug_dir = self.config.DEBUG_FRAMES_DIR / "ocr_samples"
+        debug_dir.mkdir(exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        
+        # Save symbol and price crops (both raw and preprocessed)
+        for field in ['symbol', 'price']:
+            if field in columns:
+                col_img = columns[field]
+                if col_img is not None and col_img.size > 0:
+                    # Save raw crop
+                    raw_file = debug_dir / f"evt{event_id:04d}_slot{slot_idx}_{field}_raw_{timestamp}.png"
+                    cv2.imwrite(str(raw_file), col_img)
+                    
+                    # Save preprocessed crop (what Tesseract sees)
+                    try:
+                        preprocessed = self.ocr_parser._preprocess_for_ocr(col_img, mode=field)
+                        pre_file = debug_dir / f"evt{event_id:04d}_slot{slot_idx}_{field}_preprocessed_{timestamp}.png"
+                        cv2.imwrite(str(pre_file), preprocessed)
+                    except Exception as e:
+                        logger.debug(f"Failed to save preprocessed {field}: {e}")
+        
+        logger.debug(f"Saved OCR sample crops for event {event_id}")
+    
     def _save_debug_images(self, event_id: int, roi_img: np.ndarray, row_img: np.ndarray, columns: dict):
         """
         Save debug images for event
@@ -389,7 +444,13 @@ class ScannerStreamer:
         # Mark as ready once we hit the threshold
         if not self.segmentation_ready and self.grid_stable_count >= self.stable_grid_frames:
             self.segmentation_ready = True
-            logger.info(f"✓ Segmentation ready: {num_rows} rows stable for {self.stable_grid_frames} frames")
+            # Get detailed segmentation info for logging
+            logger.info("=" * 80)
+            logger.info(f"✓ SEGMENTATION READY")
+            logger.info(f"  Rows detected: {num_rows}")
+            logger.info(f"  Stable frames: {self.grid_stable_count}/{self.stable_grid_frames}")
+            logger.info(f"  Grid stats: {current_stats}")
+            logger.info("=" * 80)
         
         return self.segmentation_ready
     
@@ -441,8 +502,16 @@ class ScannerStreamer:
 
 
 def main():
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Stream scanner events')
+    parser.add_argument('--max-seconds', type=int, help='Stop after N seconds')
+    parser.add_argument('--max-frames', type=int, help='Stop after N frames')
+    
+    args = parser.parse_args()
+    
     streamer = ScannerStreamer(config)
-    streamer.run()
+    streamer.run(max_seconds=args.max_seconds, max_frames=args.max_frames)
 
 
 if __name__ == "__main__":

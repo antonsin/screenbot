@@ -108,6 +108,26 @@ def query_last_events(n=10, green_only=False, minutes=None):
         empty_rate = (empty_stats['empty_ocr'] / stats['total']) * 100
         print(f"Empty OCR rate: {empty_stats['empty_ocr']}/{stats['total']} ({empty_rate:.1f}%)")
     
+    # Parse success rate
+    if stats['total'] > 0:
+        success_rate = (stats['successful'] / stats['total']) * 100
+        print(f"Parse success rate: {success_rate:.1f}%")
+    
+    # Top 5 most common parse failure notes
+    cursor.execute("""
+        SELECT notes, COUNT(*) as count
+        FROM events
+        WHERE parsed = 0 AND notes IS NOT NULL AND notes != ''
+        GROUP BY notes
+        ORDER BY count DESC
+        LIMIT 5
+    """)
+    failure_notes = cursor.fetchall()
+    if failure_notes:
+        print("\nTop 5 failure reasons:")
+        for idx, row in enumerate(failure_notes, 1):
+            print(f"  {idx}. [{row['count']}x] {row['notes'][:60]}")
+    
     # Price statistics for parsed events
     cursor.execute(f"""
         SELECT 
