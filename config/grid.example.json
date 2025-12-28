@@ -1,0 +1,29 @@
+{
+  "roi_rect": {
+    "x": 100,
+    "y": 100,
+    "w": 800,
+    "h": 600
+  },
+  "roi_width": 800,
+  "separators_normalized": [
+    0.22,
+    0.42,
+    0.70
+  ],
+  "separators_absolute": [
+    176,
+    336,
+    560
+  ],
+  "column_semantics": [
+    "time_hits",
+    "symbol",
+    "price",
+    "gap"
+  ],
+  "num_columns": 4,
+  "created_at": "2024-12-27T14:30:00",
+  "calibration_method": "manual",
+  "note": "Example grid calibration - run tools/calibrate_grid.py to create your own"
+}

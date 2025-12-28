@@ -18,6 +18,7 @@ import numpy as np
 import config
 from capture import FrameSource
 from scanner.row_segmenter import RowSegmenter
+from scanner.grid_segmenter import GridSegmenter
 from scanner.row_tracker import RowTracker
 from scanner.slicer import ColumnSlicer
 from scanner.color_features import ColorFeatureExtractor
@@ -64,11 +65,20 @@ class ScannerStreamer:
         # Initialize components
         self.frame_source = FrameSource(config_module)
         self.row_segmenter = RowSegmenter(config_module)
+        self.grid_segmenter = GridSegmenter(config_module)  # NEW: Grid-based segmentation
         self.row_tracker = RowTracker(config_module, max_top_rows=config_module.MAX_TOP_ROWS_TO_CHECK)
         self.column_slicer = ColumnSlicer(config_module)
         self.color_extractor = ColorFeatureExtractor(config_module)
         self.ocr_parser = OCRParser(config_module)
         self.store = ScannerStore(config_module)
+        
+        # Check if grid calibration exists
+        self.use_grid_segmenter = self.grid_segmenter.is_calibrated()
+        if self.use_grid_segmenter:
+            logger.info("✓ Using calibrated grid segmentation")
+        else:
+            logger.info("⚠ Grid not calibrated, using fallback row segmenter")
+            logger.info("  Run: python tools/calibrate_grid.py")
         
         # Performance tracking
         self.frame_count = 0
@@ -143,8 +153,17 @@ class ScannerStreamer:
                 if self.debug_segmentation_enabled:
                     self._debug_table_segmentation(roi_img)
                 
-                # Segment rows
-                rows = self.row_segmenter.segment_rows(roi_img)
+                # Segment rows using grid or fallback
+                if self.use_grid_segmenter:
+                    # Use calibrated grid segmentation
+                    rows, column_boundaries, debug_overlay = self.grid_segmenter.segment_grid(roi_img)
+                    
+                    # Save debug overlay periodically
+                    if self.frame_count % 30 == 0:  # Every 30 frames
+                        self.grid_segmenter.save_debug_overlay(debug_overlay, self.frame_count)
+                else:
+                    # Fallback to row segmenter
+                    rows = self.row_segmenter.segment_rows(roi_img)
                 
                 if not rows:
                     logger.debug("No rows detected in ROI")
@@ -197,8 +216,11 @@ class ScannerStreamer:
         row_hash = new_row['hash']
         row_idx = new_row['index']
         
-        # Slice columns
-        columns = self.column_slicer.slice_all_columns(row_img)
+        # Slice columns (use grid segmenter if calibrated)
+        if self.use_grid_segmenter:
+            columns = self.grid_segmenter.slice_row_by_columns(row_img)
+        else:
+            columns = self.column_slicer.slice_all_columns(row_img)
         
         # Extract gap color features (fast gating)
         gap_cell = columns.get('gap')

@@ -30,6 +30,7 @@ debug_frames/*.jpg
 
 # User-specific region config
 config/region.json
+config/grid.json
 
 # Scanner data (SQLite database and event logs)
 data/*.db
