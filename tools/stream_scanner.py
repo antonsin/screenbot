@@ -86,6 +86,14 @@ class ScannerStreamer:
         self.last_fps_update = time.time()
         self.current_fps = 0.0
         
+        # Diagnostic counters
+        self.captured_frames = 0
+        self.processed_frames = 0
+        self.segmented_frames = 0
+        self.ocr_attempted_frames = 0
+        self.ocr_gated_frames = 0
+        self.events_emitted = 0
+        
         # Segmentation warmup gating
         self.stable_grid_frames = config_module.STABLE_GRID_FRAMES
         self.min_expected_rows = config_module.MIN_EXPECTED_ROWS
@@ -148,18 +156,21 @@ class ScannerStreamer:
                 
                 # Capture ROI
                 roi_img = self.frame_source.capture_frame()
+                self.captured_frames += 1
                 
-                # Debug: Run table segmentation if enabled
-                if self.debug_segmentation_enabled:
-                    self._debug_table_segmentation(roi_img)
+                if roi_img is None or roi_img.size == 0:
+                    logger.warning("Captured frame is None or empty")
+                    continue
+                
+                self.processed_frames += 1
                 
                 # Segment rows using grid or fallback
                 if self.use_grid_segmenter:
                     # Use calibrated grid segmentation
                     rows, column_boundaries, debug_overlay = self.grid_segmenter.segment_grid(roi_img)
                     
-                    # Save debug overlay periodically
-                    if self.frame_count % 30 == 0:  # Every 30 frames
+                    # Save debug overlay periodically if debug mode is on
+                    if self.debug_segmentation_enabled and self.frame_count % 30 == 0:
                         self.grid_segmenter.save_debug_overlay(debug_overlay, self.frame_count)
                 else:
                     # Fallback to row segmenter
@@ -167,7 +178,11 @@ class ScannerStreamer:
                 
                 if not rows:
                     logger.debug("No rows detected in ROI")
+                    # Increment frame counter even with no rows
+                    self._update_fps()
                     continue
+                
+                self.segmented_frames += 1
                 
                 # Check grid stability for warmup gating
                 grid_ready = self._check_grid_stability(len(rows))
@@ -175,16 +190,22 @@ class ScannerStreamer:
                 if not grid_ready:
                     # Segmentation not ready yet, skip event processing
                     logger.debug(f"Grid warmup: {self.grid_stable_count}/{self.stable_grid_frames} stable frames")
+                    # Still update frame counter during warmup
+                    self._update_fps()
                     continue
                 
                 # Check for new top rows
                 new_rows = self.row_tracker.check_new_rows(rows, roi_img)
                 
+                # Count OCR attempts/gating
+                if new_rows:
+                    self.ocr_attempted_frames += 1
+                
                 # Process each new row
                 for new_row in new_rows:
                     self._process_new_row(new_row, roi_img)
                 
-                # Update FPS
+                # Update FPS (every frame)
                 self._update_fps()
                 
                 # Maintain scan interval
@@ -198,8 +219,18 @@ class ScannerStreamer:
         
         finally:
             self.frame_source.close()
-            logger.info(f"Total frames: {self.frame_count}")
-            logger.info(f"Total events: {self.event_count}")
+            
+            # Print diagnostic summary
+            logger.info("=" * 80)
+            logger.info("SCANNER SESSION SUMMARY")
+            logger.info("=" * 80)
+            logger.info(f"Captured frames:     {self.captured_frames}")
+            logger.info(f"Processed frames:    {self.processed_frames}")
+            logger.info(f"Segmented frames:    {self.segmented_frames}")
+            logger.info(f"OCR attempted:       {self.ocr_attempted_frames}")
+            logger.info(f"OCR gated (skipped): {self.ocr_gated_frames}")
+            logger.info(f"Events emitted:      {self.events_emitted}")
+            logger.info("=" * 80)
             logger.info("Scanner stream closed")
     
     def _process_new_row(self, new_row: dict, roi_img: np.ndarray):
@@ -253,8 +284,11 @@ class ScannerStreamer:
         
         # Debug: log OCR gating decision
         if not should_ocr:
+            self.ocr_gated_frames += 1
             logger.debug(f"OCR skipped due to gating: gap_color={gap_color_bucket}, "
                         f"gate_rule={'GREEN_only' if self.config.OCR_ONLY_IF_GAP_GREEN else 'all'}")
+        else:
+            logger.debug(f"OCR will run: gap_color={gap_color_bucket}")
         
         # Initialize event data
         event_data = {
@@ -331,6 +365,9 @@ class ScannerStreamer:
         # Calculate event latency
         event_latency = (time.time() - event_start) * 1000  # ms
         
+        # Increment events counter
+        self.events_emitted += 1
+        
         # Print concise event line
         self._print_event(event_data, appearances_60s, event_latency, event_id)
         
@@ -340,8 +377,6 @@ class ScannerStreamer:
                 self._save_debug_images(event_id, roi_img, row_img, columns)
             except Exception as e:
                 logger.error(f"Failed to save debug images: {e}", exc_info=True)
-        
-        self.event_count += 1
     
     def _print_event(self, event_data: dict, appearances_60s: int, latency_ms: float, event_id: int):
         """
@@ -511,11 +546,13 @@ class ScannerStreamer:
     
     def _debug_table_segmentation(self, roi_img: np.ndarray):
         """
-        Debug helper: Run table segmentation and log results
+        DEPRECATED: This method is no longer used in the main pipeline.
+        Debug overlays are now generated directly from calibrated grid segmentation.
         
-        Args:
-            roi_img: ROI image to segment
+        Keeping for reference only. Can be deleted in future cleanup.
         """
+        # This method is intentionally disabled to prevent pipeline bypass
+        return
         try:
             # Only run periodically (every 10 frames) to reduce overhead
             self.debug_segmentation_counter += 1
