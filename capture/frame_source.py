@@ -4,6 +4,7 @@ Frame source - unified interface for screen capture with mode selection
 import logging
 import platform
 import json
+import hashlib
 from typing import Optional
 from pathlib import Path
 import numpy as np
@@ -43,12 +44,20 @@ class FrameSource:
         """
         Load region.json if it exists and override config values
         """
-        region_file = self.config.BASE_DIR / "config" / "region.json"
+        # Resolve region file path from repo root (using __file__ not CWD)
+        module_dir = Path(__file__).resolve().parent  # capture/
+        repo_root = module_dir.parent  # workspace/
+        region_file = repo_root / "config" / "region.json"
         
         if region_file.exists():
             try:
-                with open(region_file, 'r') as f:
-                    region_data = json.load(f)
+                # Read file and compute SHA-256
+                with open(region_file, 'rb') as f:
+                    file_contents = f.read()
+                    file_hash = hashlib.sha256(file_contents).hexdigest()
+                
+                # Parse JSON
+                region_data = json.loads(file_contents.decode('utf-8'))
                 
                 # Override config values
                 if "capture_mode" in region_data:
@@ -63,7 +72,8 @@ class FrameSource:
                 if "abs_h" in region_data:
                     self.config.ABS_H = region_data["abs_h"]
                 
-                logger.info(f"✓ Loaded region override from: {region_file}")
+                logger.info(f"✓ Loaded region override from: {region_file.absolute()}")
+                logger.info(f"  SHA-256: {file_hash}")
                 logger.info(f"  Mode: {self.capture_mode}")
                 logger.info(f"  Region: x={self.config.ABS_X}, y={self.config.ABS_Y}, "
                            f"w={self.config.ABS_W}, h={self.config.ABS_H}")
@@ -71,7 +81,7 @@ class FrameSource:
             except Exception as e:
                 logger.warning(f"Failed to load region.json: {e}, using config.py defaults")
         else:
-            logger.debug(f"No region override found at {region_file}, using config.py defaults")
+            logger.debug(f"No region override found at {region_file.absolute()}, using config.py defaults")
     
     def _init_backend(self):
         """Initialize the capture backend based on configuration"""

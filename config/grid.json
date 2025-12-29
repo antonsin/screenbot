@@ -34,8 +34,8 @@
     "price",
     "volume",
     "float",
-    "rel_volume_daily_rate",
-    "rel_volume_5min",
+    "rel_volume_daily",
+    "rel_volume_5m",
     "gap",
     "change_from_close",
     "short_interest"
@@ -44,7 +44,13 @@
     "time_hits": 0,
     "symbol": 1,
     "price": 2,
-    "gap": 7
+    "volume": 3,
+    "float": 4,
+    "rel_volume_daily": 5,
+    "rel_volume_5m": 6,
+    "gap": 7,
+    "change_from_close": 8,
+    "short_interest": 9
   },
   "num_columns": 10,
   "created_at": "2025-12-28T22:00:00Z",

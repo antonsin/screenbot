@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 import json
 import logging
+import hashlib
 from pathlib import Path
 from datetime import datetime
 
@@ -50,6 +51,18 @@ class GridSegmenter:
             module_dir = Path(__file__).resolve().parent  # scanner/
             repo_root = module_dir.parent  # workspace/
             grid_file = repo_root / "config" / "grid.json"
+            
+            # Check for fallback files if primary doesn't exist
+            if not grid_file.exists():
+                fallback_files = [
+                    repo_root / "config" / "grid.example.10col.json",
+                    repo_root / "config" / "grid.example.json"
+                ]
+                for fallback in fallback_files:
+                    if fallback.exists():
+                        logger.warning(f"Primary grid.json not found, falling back to: {fallback}")
+                        grid_file = fallback
+                        break
         else:
             grid_file = Path(grid_path).resolve()
         
@@ -59,8 +72,13 @@ class GridSegmenter:
             return
         
         try:
-            with open(grid_file, 'r') as f:
-                self.calibration = json.load(f)
+            # Read file and compute SHA-256
+            with open(grid_file, 'rb') as f:
+                file_contents = f.read()
+                file_hash = hashlib.sha256(file_contents).hexdigest()
+            
+            # Parse JSON
+            self.calibration = json.loads(file_contents.decode('utf-8'))
             
             # Build absolute column boundaries for current ROI
             roi_width = self.calibration.get('roi_width')
@@ -71,8 +89,13 @@ class GridSegmenter:
             self.column_boundaries = [0] + [int(x * roi_width) for x in normalized_seps] + [roi_width]
             self.column_semantics = self.calibration.get('column_semantics', [])
             
-            # Load semantic-to-index mapping (new feature)
+            # Load semantic-to-index mapping or generate from column order
             self.semantic_to_index = self.calibration.get('semantic_to_index', {})
+            
+            # If semantic_to_index not provided, generate from column_semantics
+            if not self.semantic_to_index and self.column_semantics:
+                self.semantic_to_index = {col: idx for idx, col in enumerate(self.column_semantics)}
+                logger.info(f"  Generated semantic_to_index from column_semantics")
             
             # Backward compatibility: if no semantic_to_index, build from first 4 semantics
             if not self.semantic_to_index and len(self.column_semantics) >= 4:
@@ -83,15 +106,20 @@ class GridSegmenter:
                     "gap": 3
                 }
             
-            # Log absolute path and summary
+            # Log absolute path, hash, and summary
             logger.info(f"✓ Loaded grid calibration from: {grid_file.absolute()}")
+            logger.info(f"  SHA-256: {file_hash}")
             logger.info(f"  Grid calibration loaded: {len(self.column_boundaries)-1} columns")
             logger.info(f"  Column semantics: {self.column_semantics}")
             logger.info(f"  Semantic mapping: {self.semantic_to_index}")
             
             # Store for validation
             self.grid_file_path = grid_file.absolute()
+            self.grid_file_hash = file_hash
             self.num_columns = len(self.column_boundaries) - 1
+            
+            # Validate column count consistency
+            self._validate_column_counts(num_columns, normalized_seps)
             
             # Validate grid calibration for semantic mapping issues
             self._validate_grid_calibration(normalized_seps, roi_width)
@@ -99,6 +127,41 @@ class GridSegmenter:
         except Exception as e:
             logger.error(f"Failed to load grid calibration: {e}")
             self.calibration = None
+    
+    def _validate_column_counts(self, declared_num_columns: int, normalized_seps: list):
+        """
+        Validate that column counts are consistent
+        
+        Args:
+            declared_num_columns: Value from num_columns field
+            normalized_seps: List of separator positions
+        """
+        expected_sep_count = declared_num_columns - 1
+        actual_sep_count = len(normalized_seps)
+        actual_num_columns = actual_sep_count + 1
+        
+        if declared_num_columns != len(self.column_semantics):
+            logger.error("=" * 80)
+            logger.error("❌ COLUMN COUNT MISMATCH")
+            logger.error("=" * 80)
+            logger.error(f"Grid file declares num_columns={declared_num_columns}")
+            logger.error(f"But column_semantics has {len(self.column_semantics)} entries")
+            logger.error(f"Column semantics: {self.column_semantics}")
+            logger.error("")
+            logger.error("These must match! Fix config/grid.json")
+            logger.error("=" * 80)
+            raise ValueError(f"Column count mismatch: {declared_num_columns} vs {len(self.column_semantics)}")
+        
+        if actual_sep_count != expected_sep_count:
+            logger.warning("=" * 80)
+            logger.warning("⚠️  SEPARATOR COUNT MISMATCH")
+            logger.warning("=" * 80)
+            logger.warning(f"Grid declares {declared_num_columns} columns (expects {expected_sep_count} separators)")
+            logger.warning(f"But separators_normalized has {actual_sep_count} entries")
+            logger.warning(f"This will create {actual_num_columns} columns instead!")
+            logger.warning("")
+            logger.warning("Fix config/grid.json: separators should have exactly (num_columns - 1) entries")
+            logger.warning("=" * 80)
     
     def _validate_grid_calibration(self, normalized_seps: list, roi_width: int):
         """
